@@ -1,14 +1,8 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
-import {
-  PieChart,
-  Pie,
-  Cell,
-  Tooltip,
-  Legend
-} from "recharts";
-
+import { PieChart, Pie, Cell, Tooltip, Legend } from "recharts";
+import * as XLSX from "xlsx";
 
 interface ReceiptItem {
   description: string;
@@ -44,36 +38,6 @@ type SortDirection = "asc" | "desc";
 
 type ItemSortField = "unit_price" | "line_total" | null;
 
-const RADIAN = Math.PI / 180;
-
-const renderPieLabel = ({
-  cx,
-  cy,
-  midAngle,
-  innerRadius,
-  outerRadius,
-  percent,
-}: any) => {
-  // place the label halfway between inner and outer radius
-  const radius = innerRadius + (outerRadius - innerRadius) * 0.5;
-  const x = cx + radius * Math.cos(-midAngle * RADIAN);
-  const y = cy + radius * Math.sin(-midAngle * RADIAN);
-
-  return (
-    <text
-      x={x}
-      y={y}
-      fill="#ffffff"
-      textAnchor="middle"
-      dominantBaseline="central"
-      fontSize={12}
-    >
-      {(percent * 100).toFixed(0)}%
-    </text>
-  );
-};
-
-
 const DUPLICATE_HIGHLIGHT_CLASSES = [
   "border-l-4 border-l-red-500",
   "border-l-4 border-l-yellow-500",
@@ -82,6 +46,33 @@ const DUPLICATE_HIGHLIGHT_CLASSES = [
   "border-l-4 border-l-pink-500",
   "border-l-4 border-l-orange-500",
 ];
+
+const RADIAN = Math.PI / 180;
+
+const downloadBlob = (
+  content: string,
+  filename: string,
+  contentType: string
+) => {
+  const blob = new Blob([content], { type: contentType });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+};
+
+const escapeCsvValue = (value: any): string => {
+  if (value === null || value === undefined) return "";
+  const str = String(value);
+  if (/[",\n]/.test(str)) {
+    return `"${str.replace(/"/g, '""')}"`;
+  }
+  return str;
+};
 
 export default function HomePage() {
   const [files, setFiles] = useState<FileList | null>(null);
@@ -107,16 +98,27 @@ export default function HomePage() {
   const [currentPage, setCurrentPage] = useState<number>(1);
 
   // ----------- CHART FILTER STATE ------------
-  const [dateFilterType, setDateFilterType] = useState<"month" | "quarter" | "year" | "custom">("month");
+  const [dateFilterType, setDateFilterType] = useState<
+    "month" | "quarter" | "year" | "custom"
+  >("month");
   const [selectedMonth, setSelectedMonth] = useState<string>(() => {
     const d = new Date();
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(
+      2,
+      "0"
+    )}`;
   });
-  const [selectedYear, setSelectedYear] = useState<string>(String(new Date().getFullYear()));
-  const [selectedQuarter, setSelectedQuarter] = useState<"Q1" | "Q2" | "Q3" | "Q4">("Q1");
+  const [selectedYear, setSelectedYear] = useState<string>(
+    String(new Date().getFullYear())
+  );
+  const [selectedQuarter, setSelectedQuarter] = useState<
+    "Q1" | "Q2" | "Q3" | "Q4"
+  >("Q1");
   const [customStart, setCustomStart] = useState<string>("");
   const [customEnd, setCustomEnd] = useState<string>("");
-
+  const [pieLabelMode, setPieLabelMode] = useState<"percent" | "value">(
+    "percent"
+  );
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setFiles(e.target.files);
@@ -241,15 +243,15 @@ export default function HomePage() {
       const sorted = [...prev].sort((a, b) => {
         const av =
           field === "date"
-            ? (a.extracted_data.date
+            ? a.extracted_data.date
               ? new Date(a.extracted_data.date).getTime()
-              : 0)
+              : 0
             : a.extracted_data.total_amount ?? 0;
         const bv =
           field === "date"
-            ? (b.extracted_data.date
+            ? b.extracted_data.date
               ? new Date(b.extracted_data.date).getTime()
-              : 0)
+              : 0
             : b.extracted_data.total_amount ?? 0;
 
         if (av === bv) return 0;
@@ -260,7 +262,6 @@ export default function HomePage() {
       return sorted;
     });
 
-    // Reset to first page when resorting for consistency
     setCurrentPage(1);
   };
 
@@ -311,16 +312,16 @@ export default function HomePage() {
 
   // ---------- DUPLICATE DETECTION ----------
 
-  // Build a map from receipt ID to highlight class if it is part of a duplicate group.
   const duplicateHighlightById = useMemo(() => {
     const sigToIds = new Map<string, number[]>();
 
     receipts.forEach((r) => {
       const d = r.extracted_data;
-      const signature = `${(d.store_name ?? "").trim()}|${(d.date ?? "").trim()}|${d.total_amount ?? ""
-        }`;
+      const signature = `${(d.store_name ?? "").trim()}|${(
+        d.date ?? ""
+      ).trim()}|${d.total_amount ?? ""}`;
 
-      if (!signature.replace(/\|/g, "").trim()) return; // ignore empty signatures
+      if (!signature.replace(/\|/g, "").trim()) return;
 
       const list = sigToIds.get(signature) ?? [];
       list.push(r.id);
@@ -334,7 +335,7 @@ export default function HomePage() {
       if (ids.length > 1) {
         const colorClass =
           DUPLICATE_HIGHLIGHT_CLASSES[
-          colorIndex % DUPLICATE_HIGHLIGHT_CLASSES.length
+            colorIndex % DUPLICATE_HIGHLIGHT_CLASSES.length
           ];
         colorIndex++;
         ids.forEach((id) => {
@@ -356,7 +357,9 @@ export default function HomePage() {
     }
   }, [currentPage, totalPages]);
 
-  const handleRowsPerPageChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+  const handleRowsPerPageChange = (
+    e: React.ChangeEvent<HTMLSelectElement>
+  ) => {
     const value = Number(e.target.value);
     setRowsPerPage(value);
     setCurrentPage(1);
@@ -372,7 +375,6 @@ export default function HomePage() {
 
   const startIndex = (currentPage - 1) * rowsPerPage;
   const pageReceipts = receipts.slice(startIndex, startIndex + rowsPerPage);
-
 
   // ---------- FILTER RECEIPTS FOR CHART ----------
   const filteredReceiptsForChart = useMemo(() => {
@@ -397,7 +399,10 @@ export default function HomePage() {
 
         case "quarter": {
           const q = Math.floor(d.getMonth() / 3) + 1;
-          return `Q${q}` === selectedQuarter && d.getFullYear() === Number(selectedYear);
+          return (
+            `Q${q}` === selectedQuarter &&
+            d.getFullYear() === Number(selectedYear)
+          );
         }
 
         case "custom": {
@@ -413,7 +418,15 @@ export default function HomePage() {
           return true;
       }
     });
-  }, [receipts, dateFilterType, selectedMonth, selectedQuarter, selectedYear, customStart, customEnd]);
+  }, [
+    receipts,
+    dateFilterType,
+    selectedMonth,
+    selectedQuarter,
+    selectedYear,
+    customStart,
+    customEnd,
+  ]);
 
   // ---------- BUILD CATEGORY TOTALS FOR PIE CHART ----------
   const pieChartData = useMemo(() => {
@@ -432,15 +445,195 @@ export default function HomePage() {
     }));
   }, [filteredReceiptsForChart]);
 
+  const totalChartAmount = useMemo(
+    () =>
+      pieChartData.reduce((sum, entry) => sum + (entry.value || 0), 0),
+    [pieChartData]
+  );
+
+  const renderPieLabel = (props: any) => {
+    const { cx, cy, midAngle, innerRadius, outerRadius, percent, value } =
+      props;
+    if (!value || value <= 0) return null;
+    const radius = innerRadius + (outerRadius - innerRadius) * 0.5;
+    const x = cx + radius * Math.cos(-midAngle * RADIAN);
+    const y = cy + radius * Math.sin(-midAngle * RADIAN);
+    const text =
+      pieLabelMode === "percent"
+        ? `${(percent * 100).toFixed(0)}%`
+        : `${value.toFixed ? value.toFixed(2) : value}`;
+    return (
+      <text
+        x={x}
+        y={y}
+        fill="#ffffff"
+        textAnchor="middle"
+        dominantBaseline="central"
+        fontSize={11}
+      >
+        {text}
+      </text>
+    );
+  };
+
+  // ---------- EXPORT HANDLERS ----------
+
+  const handleExportCSV = () => {
+    if (receipts.length === 0) return;
+    const headers = [
+      "id",
+      "store_name",
+      "store_address",
+      "store_tax_id",
+      "date",
+      "payment_method",
+      "subtotal_amount",
+      "tax_amount",
+      "total_amount",
+      "currency",
+      "category",
+      "confidence_score",
+      "file",
+      "created_at",
+    ];
+
+    const rows = receipts.map((r) => {
+      const d = r.extracted_data;
+      const values = [
+        r.id,
+        d.store_name ?? "",
+        d.store_address ?? "",
+        d.store_tax_id ?? "",
+        d.date ?? "",
+        d.payment_method ?? "",
+        d.subtotal_amount ?? "",
+        d.tax_amount ?? "",
+        d.total_amount ?? "",
+        d.currency ?? "",
+        d.category ?? "",
+        d.confidence_score ?? "",
+        r.file ?? "",
+        r.created_at ?? "",
+      ];
+      return values.map(escapeCsvValue).join(",");
+    });
+
+    const csvContent = [headers.join(","), ...rows].join("\n");
+    downloadBlob(
+      csvContent,
+      "snapspend_receipts.csv",
+      "text/csv;charset=utf-8;"
+    );
+  };
+
+  const handleExportGoogleSheets = () => {
+    if (receipts.length === 0) return;
+    const headers = [
+      "id",
+      "store_name",
+      "store_address",
+      "store_tax_id",
+      "date",
+      "payment_method",
+      "subtotal_amount",
+      "tax_amount",
+      "total_amount",
+      "currency",
+      "category",
+      "confidence_score",
+      "file",
+      "created_at",
+    ];
+
+    const rows = receipts.map((r) => {
+      const d = r.extracted_data;
+      const values = [
+        r.id,
+        d.store_name ?? "",
+        d.store_address ?? "",
+        d.store_tax_id ?? "",
+        d.date ?? "",
+        d.payment_method ?? "",
+        d.subtotal_amount ?? "",
+        d.tax_amount ?? "",
+        d.total_amount ?? "",
+        d.currency ?? "",
+        d.category ?? "",
+        d.confidence_score ?? "",
+        r.file ?? "",
+        r.created_at ?? "",
+      ];
+      return values.map(escapeCsvValue).join(",");
+    });
+
+    const csvContent = [headers.join(","), ...rows].join("\n");
+    downloadBlob(
+      csvContent,
+      "snapspend_google_sheets.csv",
+      "text/csv;charset=utf-8;"
+    );
+  };
+
+  const handleExportExcel = () => {
+    if (receipts.length === 0) return;
+
+    const receiptsSheetRows = receipts.map((r) => {
+      const d = r.extracted_data;
+      return {
+        id: r.id,
+        store_name: d.store_name ?? "",
+        store_address: d.store_address ?? "",
+        store_tax_id: d.store_tax_id ?? "",
+        date: d.date ?? "",
+        payment_method: d.payment_method ?? "",
+        subtotal_amount: d.subtotal_amount ?? "",
+        tax_amount: d.tax_amount ?? "",
+        total_amount: d.total_amount ?? "",
+        currency: d.currency ?? "",
+        category: d.category ?? "",
+        confidence_score: d.confidence_score ?? "",
+        file: r.file ?? "",
+        created_at: r.created_at ?? "",
+      };
+    });
+
+    const itemsSheetRows: any[] = [];
+    receipts.forEach((r) => {
+      const d = r.extracted_data;
+      r.extracted_data.items.forEach((item, index) => {
+        itemsSheetRows.push({
+          receipt_id: r.id,
+          store_name: d.store_name ?? "",
+          date: d.date ?? "",
+          item_index: index + 1,
+          description: item.description ?? "",
+          quantity: item.quantity ?? "",
+          unit_price: item.unit_price ?? "",
+          line_total: item.line_total ?? "",
+        });
+      });
+    });
+
+    const wb = XLSX.utils.book_new();
+    const receiptsSheet = XLSX.utils.json_to_sheet(receiptsSheetRows);
+    XLSX.utils.book_append_sheet(wb, receiptsSheet, "Receipts");
+    const itemsSheet = XLSX.utils.json_to_sheet(itemsSheetRows);
+    XLSX.utils.book_append_sheet(wb, itemsSheet, "LineItems");
+
+    XLSX.writeFile(wb, "snapspend_export.xlsx");
+  };
 
   return (
     <main className="min-h-screen bg-gray-50 p-6">
       <div className="max-w-6xl mx-auto space-y-6">
         {/* HEADER */}
         <header className="space-y-1">
-          <h1 className="text-3xl font-bold">SnapSpend Lite — Receipt Extractor</h1>
+          <h1 className="text-3xl font-bold">
+            SnapSpend Lite — Receipt Extractor
+          </h1>
           <p className="text-gray-600">
-            Upload multiple receipts, then validate and edit extracted data in a table.
+            Upload multiple receipts, then validate and edit extracted data in a
+            table.
           </p>
         </header>
 
@@ -471,8 +664,8 @@ export default function HomePage() {
               <div>
                 <h2 className="text-xl font-semibold">Receipts Summary</h2>
                 <p className="text-sm text-gray-500">
-                  Click a row to expand and see its line items. Duplicate receipts are
-                  highlighted with colored side borders.
+                  Click a row to expand and see its line items. Duplicate
+                  receipts are highlighted with colored side borders.
                 </p>
               </div>
               {/* Pagination controls */}
@@ -509,6 +702,34 @@ export default function HomePage() {
                     Next
                   </button>
                 </div>
+              </div>
+            </div>
+
+            {/* EXPORT CONTROLS */}
+            <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
+              <span className="text-gray-600">Export data:</span>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={handleExportCSV}
+                  className="border rounded px-3 py-1 text-xs bg-white hover:bg-gray-50"
+                >
+                  CSV
+                </button>
+                <button
+                  type="button"
+                  onClick={handleExportExcel}
+                  className="border rounded px-3 py-1 text-xs bg-white hover:bg-gray-50"
+                >
+                  Excel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleExportGoogleSheets}
+                  className="border rounded px-3 py-1 text-xs bg-white hover:bg-gray-50"
+                >
+                  Google Sheets
+                </button>
               </div>
             </div>
 
@@ -553,8 +774,9 @@ export default function HomePage() {
                       <React.Fragment key={receipt.id}>
                         <tr
                           onClick={() => toggleAccordion(receipt.id)}
-                          className={`border-b hover:bg-gray-50 cursor-pointer ${isExpanded ? "bg-indigo-50" : ""
-                            } ${duplicateClass}`}
+                          className={`border-b hover:bg-gray-50 cursor-pointer ${
+                            isExpanded ? "bg-indigo-50" : ""
+                          } ${duplicateClass}`}
                         >
                           <Td>{globalIndex + 1}</Td>
 
@@ -725,7 +947,6 @@ export default function HomePage() {
                           </Td>
                         </tr>
 
-                        {/* ACCORDION ROW */}
                         {isExpanded && (
                           <tr>
                             <Td colSpan={13} className="bg-gray-50">
@@ -733,7 +954,9 @@ export default function HomePage() {
                                 receipt={receipt}
                                 sortField={itemSortField}
                                 sortDirection={itemSortDirection}
-                                onSort={(field) => handleItemSort(field, receipt.id)}
+                                onSort={(field) =>
+                                  handleItemSort(field, receipt.id)
+                                }
                                 onUpdateItem={updateItemField}
                               />
                             </Td>
@@ -748,6 +971,7 @@ export default function HomePage() {
           </section>
         )}
 
+        {/* EXPENSE BREAKDOWN + PIE CHART */}
         {receipts.length > 0 && (
           <section className="bg-white rounded-2xl shadow p-4 space-y-4">
             <h2 className="text-xl font-semibold">Expense Breakdown</h2>
@@ -756,7 +980,9 @@ export default function HomePage() {
             <div className="flex flex-wrap gap-4 items-center">
               <select
                 value={dateFilterType}
-                onChange={(e) => setDateFilterType(e.target.value as any)}
+                onChange={(e) =>
+                  setDateFilterType(e.target.value as any)
+                }
                 className="border px-2 py-1 rounded text-sm"
               >
                 <option value="month">By Month</option>
@@ -780,7 +1006,9 @@ export default function HomePage() {
                 <>
                   <select
                     value={selectedQuarter}
-                    onChange={(e) => setSelectedQuarter(e.target.value as any)}
+                    onChange={(e) =>
+                      setSelectedQuarter(e.target.value as any)
+                    }
                     className="border px-2 py-1 rounded text-sm"
                   >
                     <option value="Q1">Q1</option>
@@ -829,43 +1057,88 @@ export default function HomePage() {
                   />
                 </>
               )}
+
+              {/* SLICE LABEL MODE TOGGLE */}
+              <div className="flex items-center gap-2 ml-auto">
+                <span className="text-xs text-gray-500">
+                  Slice labels:
+                </span>
+                <button
+                  type="button"
+                  className={`border rounded px-2 py-1 text-xs ${
+                    pieLabelMode === "percent"
+                      ? "bg-indigo-600 text-white border-indigo-600"
+                      : "bg-white text-gray-700"
+                  }`}
+                  onClick={() => setPieLabelMode("percent")}
+                >
+                  %
+                </button>
+                <button
+                  type="button"
+                  className={`border rounded px-2 py-1 text-xs ${
+                    pieLabelMode === "value"
+                      ? "bg-indigo-600 text-white border-indigo-600"
+                      : "bg-white text-gray-700"
+                  }`}
+                  onClick={() => setPieLabelMode("value")}
+                >
+                  Amount
+                </button>
+              </div>
             </div>
 
             {/* PIE CHART */}
             <div className="w-full flex justify-center">
-              <PieChart width={350} height={350}>
-                <Pie
-                  data={pieChartData}
-                  cx={175}
-                  cy={170}
-                  innerRadius={60}
-                  outerRadius={130}
-                  dataKey="value"
-                  paddingAngle={2}
-                  labelLine={false}
-                  label={renderPieLabel}  // 👈 custom label INSIDE slices
-                >
-                  {pieChartData.map((entry, index) => (
-                    <Cell
-                      key={`cell-${index}`}
-                      fill={`hsl(${(index * 57) % 360} 70% 60%)`}
-                    />
-                  ))}
-                </Pie>
-                <Tooltip />
-                <Legend />
-              </PieChart>
+              <div className="relative">
+                <PieChart width={360} height={360}>
+                  <Pie
+                    data={pieChartData}
+                    cx={180}
+                    cy={180}
+                    innerRadius={70}
+                    outerRadius={130}
+                    paddingAngle={2}
+                    labelLine={false}
+                    label={renderPieLabel}
+                    dataKey="value"
+                  >
+                    {pieChartData.map((entry, index) => (
+                      <Cell
+                        key={`cell-${index}`}
+                        fill={`hsl(${(index * 57) % 360} 70% 60%)`}
+                      />
+                    ))}
+                  </Pie>
+                  <Tooltip />
+                  <Legend />
+                </PieChart>
 
+                {pieChartData.length > 0 && (
+                  <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
+                    <span className="text-xs text-gray-500">
+                      Total
+                    </span>
+                    <span className="text-lg font-semibold">
+                      {totalChartAmount.toLocaleString(undefined, {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })}
+                    </span>
+                  </div>
+                )}
+              </div>
             </div>
           </section>
         )}
-
 
         {/* BOTTOM UPLOAD PANEL (for long tables) */}
         {receipts.length > 0 && (
           <section className="bg-white rounded-2xl shadow p-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div className="flex-1">
-              <p className="text-sm font-medium mb-1">Upload more receipts</p>
+              <p className="text-sm font-medium mb-1">
+                Upload more receipts
+              </p>
               <input
                 type="file"
                 accept="image/*,.pdf"
@@ -909,7 +1182,9 @@ function LineItemsTable({
   ) => void;
 }) {
   const items = receipt.extracted_data.items;
-  const imageUrl = `${process.env.NEXT_PUBLIC_API_BASE_URL ?? ""}${receipt.file}`;
+  const imageUrl = `${
+    process.env.NEXT_PUBLIC_API_BASE_URL ?? ""
+  }${receipt.file}`;
 
   const [imgLoaded, setImgLoaded] = useState(false);
   const [imgError, setImgError] = useState(false);
@@ -926,12 +1201,11 @@ function LineItemsTable({
   return (
     <>
       <div className="space-y-3">
-        {/* HEADER + META */}
         <div className="flex flex-col gap-3 md:flex-row md:items-start md:gap-6">
-          {/* IMAGE PREVIEW PANEL */}
           <div className="md:w-1/3 space-y-2">
             <h3 className="font-semibold text-sm">
-              Receipt Preview — {receipt.extracted_data.store_name ?? "Unknown Store"}
+              Receipt Preview —{" "}
+              {receipt.extracted_data.store_name ?? "Unknown Store"}
             </h3>
             <p className="text-[11px] text-gray-500">
               Click the image to zoom in without leaving the page.
@@ -939,7 +1213,6 @@ function LineItemsTable({
 
             <div className="border rounded-xl bg-white p-2 flex items-center justify-center min-h-40">
               {imgError ? (
-                // Broken image fallback
                 <div className="flex flex-col items-center justify-center text-gray-400 text-xs space-y-2 py-6">
                   <div className="w-12 h-12 rounded-full bg-gray-200 flex items-center justify-center">
                     <span className="text-lg">⚠️</span>
@@ -948,7 +1221,6 @@ function LineItemsTable({
                 </div>
               ) : (
                 <>
-                  {/* Skeleton while loading */}
                   {!imgLoaded && (
                     <div className="w-full h-40 bg-gray-200 rounded-lg animate-pulse" />
                   )}
@@ -957,8 +1229,9 @@ function LineItemsTable({
                     <img
                       src={imageUrl}
                       alt={`Receipt ${receipt.id}`}
-                      className={`max-h-64 w-auto object-contain rounded-lg cursor-zoom-in ${imgLoaded ? "block" : "hidden"
-                        }`}
+                      className={`max-h-64 w-auto object-contain rounded-lg cursor-zoom-in ${
+                        imgLoaded ? "block" : "hidden"
+                      }`}
                       onLoad={() => setImgLoaded(true)}
                       onError={() => setImgError(true)}
                       onClick={handleImageClick}
@@ -984,16 +1257,19 @@ function LineItemsTable({
               </p>
               <p>
                 <span className="font-medium">Confidence:</span>{" "}
-                {(receipt.extracted_data.confidence_score * 100).toFixed(0)}%
+                {(
+                  receipt.extracted_data.confidence_score * 100
+                ).toFixed(0)}
+                %
               </p>
             </div>
           </div>
 
-          {/* LINE ITEMS TABLE */}
           <div className="md:w-2/3">
             <div className="flex items-center justify-between mb-1">
               <h3 className="font-semibold text-sm">
-                Line Items — {receipt.extracted_data.store_name ?? "Unknown Store"}
+                Line Items —{" "}
+                {receipt.extracted_data.store_name ?? "Unknown Store"}
               </h3>
               <span className="text-xs text-gray-500">
                 {items.length} item{items.length === 1 ? "" : "s"}
@@ -1104,7 +1380,6 @@ function LineItemsTable({
         </div>
       </div>
 
-      {/* ZOOM MODAL */}
       {isModalOpen && !imgError && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/70"
@@ -1132,8 +1407,6 @@ function LineItemsTable({
     </>
   );
 }
-
-// ---------- SMALL TABLE HELPERS ----------
 
 function Th({ children }: { children: React.ReactNode }) {
   return (
@@ -1177,8 +1450,9 @@ function SortableTh({
 }) {
   return (
     <th
-      className={`px-2 py-2 border text-left ${small ? "text-xs" : "text-sm"
-        } font-medium text-gray-700 cursor-pointer select-none`}
+      className={`px-2 py-2 border text-left ${
+        small ? "text-xs" : "text-sm"
+      } font-medium text-gray-700 cursor-pointer select-none`}
       onClick={(e) => {
         e.stopPropagation();
         onClick();
