@@ -335,7 +335,7 @@ export default function HomePage() {
       if (ids.length > 1) {
         const colorClass =
           DUPLICATE_HIGHLIGHT_CLASSES[
-            colorIndex % DUPLICATE_HIGHLIGHT_CLASSES.length
+          colorIndex % DUPLICATE_HIGHLIGHT_CLASSES.length
           ];
         colorIndex++;
         ids.forEach((id) => {
@@ -480,7 +480,9 @@ export default function HomePage() {
 
   const handleExportCSV = () => {
     if (receipts.length === 0) return;
-    const headers = [
+
+    // --- RECEIPTS CSV ---
+    const receiptHeaders = [
       "id",
       "store_name",
       "store_address",
@@ -497,7 +499,7 @@ export default function HomePage() {
       "created_at",
     ];
 
-    const rows = receipts.map((r) => {
+    const receiptRows = receipts.map((r) => {
       const d = r.extracted_data;
       const values = [
         r.id,
@@ -518,17 +520,60 @@ export default function HomePage() {
       return values.map(escapeCsvValue).join(",");
     });
 
-    const csvContent = [headers.join(","), ...rows].join("\n");
+    const receiptCsv = [receiptHeaders.join(","), ...receiptRows].join("\n");
+
     downloadBlob(
-      csvContent,
+      receiptCsv,
       "snapspend_receipts.csv",
       "text/csv;charset=utf-8;"
     );
+
+    // --- LINE ITEMS CSV ---
+    const itemHeaders = [
+      "receipt_id",
+      "store_name",
+      "date",
+      "item_index",
+      "description",
+      "quantity",
+      "unit_price",
+      "line_total",
+    ];
+
+    const itemRows: string[] = [];
+
+    receipts.forEach((r) => {
+      const d = r.extracted_data;
+      r.extracted_data.items.forEach((item, index) => {
+        const values = [
+          r.id,
+          d.store_name ?? "",
+          d.date ?? "",
+          index + 1,
+          item.description ?? "",
+          item.quantity ?? "",
+          item.unit_price ?? "",
+          item.line_total ?? "",
+        ];
+        itemRows.push(values.map(escapeCsvValue).join(","));
+      });
+    });
+
+    const itemCsv = [itemHeaders.join(","), ...itemRows].join("\n");
+
+    downloadBlob(
+      itemCsv,
+      "snapspend_line_items.csv",
+      "text/csv;charset=utf-8;"
+    );
   };
+
 
   const handleExportGoogleSheets = () => {
     if (receipts.length === 0) return;
-    const headers = [
+
+    // --- RECEIPTS CSV (for Sheets import) ---
+    const receiptHeaders = [
       "id",
       "store_name",
       "store_address",
@@ -545,7 +590,7 @@ export default function HomePage() {
       "created_at",
     ];
 
-    const rows = receipts.map((r) => {
+    const receiptRows = receipts.map((r) => {
       const d = r.extracted_data;
       const values = [
         r.id,
@@ -566,13 +611,54 @@ export default function HomePage() {
       return values.map(escapeCsvValue).join(",");
     });
 
-    const csvContent = [headers.join(","), ...rows].join("\n");
+    const receiptCsv = [receiptHeaders.join(","), ...receiptRows].join("\n");
+
     downloadBlob(
-      csvContent,
-      "snapspend_google_sheets.csv",
+      receiptCsv,
+      "snapspend_receipts_for_sheets.csv",
+      "text/csv;charset=utf-8;"
+    );
+
+    // --- LINE ITEMS CSV (for Sheets import) ---
+    const itemHeaders = [
+      "receipt_id",
+      "store_name",
+      "date",
+      "item_index",
+      "description",
+      "quantity",
+      "unit_price",
+      "line_total",
+    ];
+
+    const itemRows: string[] = [];
+
+    receipts.forEach((r) => {
+      const d = r.extracted_data;
+      r.extracted_data.items.forEach((item, index) => {
+        const values = [
+          r.id,
+          d.store_name ?? "",
+          d.date ?? "",
+          index + 1,
+          item.description ?? "",
+          item.quantity ?? "",
+          item.unit_price ?? "",
+          item.line_total ?? "",
+        ];
+        itemRows.push(values.map(escapeCsvValue).join(","));
+      });
+    });
+
+    const itemCsv = [itemHeaders.join(","), ...itemRows].join("\n");
+
+    downloadBlob(
+      itemCsv,
+      "snapspend_line_items_for_sheets.csv",
       "text/csv;charset=utf-8;"
     );
   };
+
 
   const handleExportExcel = () => {
     if (receipts.length === 0) return;
@@ -774,9 +860,8 @@ export default function HomePage() {
                       <React.Fragment key={receipt.id}>
                         <tr
                           onClick={() => toggleAccordion(receipt.id)}
-                          className={`border-b hover:bg-gray-50 cursor-pointer ${
-                            isExpanded ? "bg-indigo-50" : ""
-                          } ${duplicateClass}`}
+                          className={`border-b hover:bg-gray-50 cursor-pointer ${isExpanded ? "bg-indigo-50" : ""
+                            } ${duplicateClass}`}
                         >
                           <Td>{globalIndex + 1}</Td>
 
@@ -1065,22 +1150,20 @@ export default function HomePage() {
                 </span>
                 <button
                   type="button"
-                  className={`border rounded px-2 py-1 text-xs ${
-                    pieLabelMode === "percent"
-                      ? "bg-indigo-600 text-white border-indigo-600"
-                      : "bg-white text-gray-700"
-                  }`}
+                  className={`border rounded px-2 py-1 text-xs ${pieLabelMode === "percent"
+                    ? "bg-indigo-600 text-white border-indigo-600"
+                    : "bg-white text-gray-700"
+                    }`}
                   onClick={() => setPieLabelMode("percent")}
                 >
                   %
                 </button>
                 <button
                   type="button"
-                  className={`border rounded px-2 py-1 text-xs ${
-                    pieLabelMode === "value"
-                      ? "bg-indigo-600 text-white border-indigo-600"
-                      : "bg-white text-gray-700"
-                  }`}
+                  className={`border rounded px-2 py-1 text-xs ${pieLabelMode === "value"
+                    ? "bg-indigo-600 text-white border-indigo-600"
+                    : "bg-white text-gray-700"
+                    }`}
                   onClick={() => setPieLabelMode("value")}
                 >
                   Amount
@@ -1132,7 +1215,7 @@ export default function HomePage() {
           </section>
         )}
 
-        {/* BOTTOM UPLOAD PANEL (for long tables) */}
+        {/* BOTTOM UPLOAD PANEL (for long tables)
         {receipts.length > 0 && (
           <section className="bg-white rounded-2xl shadow p-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div className="flex-1">
@@ -1155,7 +1238,7 @@ export default function HomePage() {
               {loading ? "Processing…" : "Upload & Extract"}
             </button>
           </section>
-        )}
+        )} */}
       </div>
     </main>
   );
@@ -1182,9 +1265,8 @@ function LineItemsTable({
   ) => void;
 }) {
   const items = receipt.extracted_data.items;
-  const imageUrl = `${
-    process.env.NEXT_PUBLIC_API_BASE_URL ?? ""
-  }${receipt.file}`;
+  const imageUrl = `${process.env.NEXT_PUBLIC_API_BASE_URL ?? ""
+    }${receipt.file}`;
 
   const [imgLoaded, setImgLoaded] = useState(false);
   const [imgError, setImgError] = useState(false);
@@ -1229,9 +1311,8 @@ function LineItemsTable({
                     <img
                       src={imageUrl}
                       alt={`Receipt ${receipt.id}`}
-                      className={`max-h-64 w-auto object-contain rounded-lg cursor-zoom-in ${
-                        imgLoaded ? "block" : "hidden"
-                      }`}
+                      className={`max-h-64 w-auto object-contain rounded-lg cursor-zoom-in ${imgLoaded ? "block" : "hidden"
+                        }`}
                       onLoad={() => setImgLoaded(true)}
                       onError={() => setImgError(true)}
                       onClick={handleImageClick}
@@ -1450,9 +1531,8 @@ function SortableTh({
 }) {
   return (
     <th
-      className={`px-2 py-2 border text-left ${
-        small ? "text-xs" : "text-sm"
-      } font-medium text-gray-700 cursor-pointer select-none`}
+      className={`px-2 py-2 border text-left ${small ? "text-xs" : "text-sm"
+        } font-medium text-gray-700 cursor-pointer select-none`}
       onClick={(e) => {
         e.stopPropagation();
         onClick();
