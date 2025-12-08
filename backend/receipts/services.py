@@ -30,7 +30,7 @@ Use null when information is missing, unreadable, or ambiguous.
   "subtotal_amount": number | null,          // before tax/fees
   "tax_amount": number | null,
   "total_amount": number | null,
-  "currency": string | null,
+  "currency": "PHP" | "USD" | "EUR" | "JPY" | "GBP",
 
   "category": string | null,                 // inferred expense category
 
@@ -142,9 +142,6 @@ IMPORTANT RULES
 - Do not hallucinate values not present in the receipt.
 """
 
-
-
-
     response = client.chat.completions.create(
         model="gpt-4o-mini",  # or gpt-4o if you prefer
         messages=[
@@ -172,9 +169,46 @@ IMPORTANT RULES
     )
 
     json_content = response.choices[0].message.content
-    # The SDK should parse this as JSON already when using json_object,
-    # but you can `json.loads` if it returns a string.
+
     import json
     if isinstance(json_content, str):
-        return json.loads(json_content)
-    return json_content
+        data = json.loads(json_content)
+    else:
+        data = json_content
+
+    # -------- Currency normalizer (Option 3) -------- #
+
+    def normalize_currency(cur):
+        """
+        Normalize any model output to a safe, supported currency.
+        For SnapSpend Lite we default to PHP if anything looks off.
+        """
+        if not cur:
+            return "PHP"
+
+        cur = str(cur).upper().strip()
+
+        # Known / allowed currencies
+        allowed = {"PHP", "USD", "EUR", "JPY", "GBP"}
+
+        # Map common mistakes / weird outputs to PHP
+        if cur in {
+            "PESO",
+            "PH",
+            "PHP.",
+            "PHPH",
+            "NV",
+            "PHP$",
+            "₱",
+        }:
+            return "PHP"
+
+        # If it's not explicitly allowed, assume PHP for this deployment
+        if cur not in allowed:
+            return "PHP"
+
+        return cur
+
+    data["currency"] = normalize_currency(data.get("currency"))
+
+    return data

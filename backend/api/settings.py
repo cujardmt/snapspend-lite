@@ -25,7 +25,7 @@ load_dotenv(os.path.join(BASE_DIR, ".env"))
 SECRET_KEY = "django-insecure-d+^m0o@==uockxybz_8hb6^s-kfjihdd9ca9o8g9+su+^v@jh&"
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = False
 
 ALLOWED_HOSTS = []
 
@@ -42,6 +42,17 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    # Required for allauth
+    "django.contrib.sites",
+
+    # Allauth core
+    "allauth",
+    "allauth.account",
+    "allauth.socialaccount",
+
+    # Providers
+    "allauth.socialaccount.providers.google",
+    "allauth.socialaccount.providers.facebook",
     "corsheaders",
     "rest_framework",
     "receipts",
@@ -54,6 +65,8 @@ MIDDLEWARE = [
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    # REQUIRED FOR DJANGO-ALLAUTH
+    "allauth.account.middleware.AccountMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
@@ -136,6 +149,7 @@ MEDIA_ROOT = BASE_DIR / os.getenv("MEDIA_ROOT", "media")
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",   # Your Next.js frontend
     "http://127.0.0.1:3000",
+    
 ]
 
 CORS_ALLOW_METHODS = [
@@ -152,3 +166,29 @@ CORS_ALLOW_HEADERS = [
     "authorization",
     "x-csrftoken",
 ]
+
+CORS_ALLOW_CREDENTIALS = True
+
+SESSION_COOKIE_SAME_SITE = "Lax"
+CSRF_COOKIE_SAME_SITE = "Lax"
+
+CSRF_TRUSTED_ORIGINS = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+]
+
+
+SITE_ID = 3
+
+AUTHENTICATION_BACKENDS = [
+    "django.contrib.auth.backends.ModelBackend",            # keep Django's default
+    "allauth.account.auth_backends.AuthenticationBackend",  # add allauth
+]
+
+LOGIN_REDIRECT_URL = "/"                # where to go after login
+# LOGIN_REDIRECT_URL = "http://localhost:3000/dashboard/"
+# ACCOUNT_LOGOUT_REDIRECT_URL = "/"       # where to go after logout
+ACCOUNT_LOGOUT_REDIRECT_URL = "http://localhost:3000/"
+ACCOUNT_AUTHENTICATION_METHOD = "email"  # or "username_email" or "username"
+ACCOUNT_EMAIL_REQUIRED = True
+ACCOUNT_EMAIL_VERIFICATION = "optional"  # "mandatory" in production
