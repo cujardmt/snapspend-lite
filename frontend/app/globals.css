@@ -1213,3 +1213,42 @@ tbody tr:hover {
   height: 10px;
   border-radius: 999px;
 }
+
+.receipt-header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.export-wrapper {
+  position: relative;
+}
+
+.export-menu {
+  position: absolute;
+  right: 0;
+  margin-top: 6px;
+  min-width: 180px;
+  background: #ffffff;
+  border-radius: 12px;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.15);
+  border: 1px solid #e5e7eb;
+  padding: 6px 0;
+  z-index: 50;
+}
+
+.export-menu button {
+  width: 100%;
+  text-align: left;
+  padding: 8px 12px;
+  background: transparent;
+  border: none;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.export-menu button:hover {
+  background: #f3f4ff;
+}

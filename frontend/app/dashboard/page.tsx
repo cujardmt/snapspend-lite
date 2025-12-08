@@ -58,6 +58,8 @@ export default function DashboardPage() {
   const [receipts, setReceipts] = useState<Receipt[]>([]);
   const [checkingAuth, setCheckingAuth] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [exportOpen, setExportOpen] = useState(false);
+
 
   const [filterCategory, setFilterCategory] = useState<string>("All Categories");
   const [sortField, setSortField] = useState<"date" | "category" | "total">(
@@ -342,11 +344,11 @@ export default function DashboardPage() {
         prev.map((rec) =>
           rec.id === receiptId
             ? {
-                ...rec,
-                items: rec.items.map((it) =>
-                  it.id === item.id ? { ...it, ...updatedItem } : it
-                ),
-              }
+              ...rec,
+              items: rec.items.map((it) =>
+                it.id === item.id ? { ...it, ...updatedItem } : it
+              ),
+            }
             : rec
         )
       );
@@ -375,612 +377,762 @@ export default function DashboardPage() {
     );
   }
 
+  // Build a flat row set: one row per receipt item
+  function buildExportRows(source: Receipt[]): string[][] {
+    const rows: string[][] = [];
+
+    rows.push([
+      "receipt_id",
+      "store_name",
+      "date",
+      "category",
+      "currency",
+      "total_amount",
+      "tax_amount",
+      "item_id",
+      "item_description",
+      "item_quantity",
+      "item_unit_price",
+      "item_line_total",
+    ]);
+
+    source.forEach((r) => {
+      if (r.items && r.items.length > 0) {
+        r.items.forEach((item) => {
+          rows.push([
+            String(r.id),
+            r.store_name ?? "",
+            r.date ?? "",
+            r.category ?? "",
+            r.currency ?? "",
+            r.total_amount ?? "",
+            r.tax_amount ?? "",
+            String(item.id),
+            item.description ?? "",
+            item.quantity ?? "",
+            item.unit_price ?? "",
+            item.line_total ?? "",
+          ]);
+        });
+      } else {
+        // Receipt with no items – still export one row
+        rows.push([
+          String(r.id),
+          r.store_name ?? "",
+          r.date ?? "",
+          r.category ?? "",
+          r.currency ?? "",
+          r.total_amount ?? "",
+          r.tax_amount ?? "",
+          "",
+          "",
+          "",
+          "",
+          "",
+        ]);
+      }
+    });
+
+    return rows;
+  }
+
+  function buildCsv(rows: string[][]): string {
+    return rows
+      .map((row) =>
+        row
+          .map((value) => {
+            const s = value ?? "";
+            const needsQuotes =
+              s.includes(",") || s.includes('"') || s.includes("\n");
+            if (needsQuotes) {
+              return `"${s.replace(/"/g, '""')}"`;
+            }
+            return s;
+          })
+          .join(","),
+      )
+      .join("\r\n");
+  }
+
+  function triggerDownload(filename: string, mimeType: string, data: string) {
+    const blob = new Blob([data], { type: mimeType });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  function exportAsCsv() {
+    const rows = buildExportRows(receipts);
+    const csv = buildCsv(rows);
+    triggerDownload("snapspend_receipts.csv", "text/csv;charset=utf-8;", csv);
+    setExportOpen(false);
+  }
+
+  // NOTE: we still generate CSV data, but give it a .xlsx extension
+  // so Excel opens it directly. This avoids needing extra libraries.
+  function exportAsXlsx() {
+    const rows = buildExportRows(receipts);
+    const csv = buildCsv(rows);
+    triggerDownload("snapspend_receipts.xlsx", "text/csv;charset=utf-8;", csv);
+    setExportOpen(false);
+  }
+
+  // Same CSV, but named for Sheets + open Sheets homepage in a new tab
+  function exportForGoogleSheets() {
+    const rows = buildExportRows(receipts);
+    const csv = buildCsv(rows);
+    triggerDownload(
+      "snapspend_receipts_for_sheets.csv",
+      "text/csv;charset=utf-8;",
+      csv,
+    );
+    try {
+      window.open("https://docs.google.com/spreadsheets/u/0/", "_blank");
+    } catch {
+      // ignore if popup blocked
+    }
+    setExportOpen(false);
+  }
+
   const hasReceipts = receipts.length > 0;
 
   return (
     <>
-    <div className="layout-main">
+      <div className="layout-main">
 
-    
-      {/* Upload card */}
-      <section className="card upload-card">
-        <form onSubmit={handleUpload} className="upload-dropzone">
-          <div className="upload-inner">
-            <div className="upload-icon">⬆️</div>
-            <div className="upload-title">Upload Receipt</div>
-            <div className="upload-subtitle">
-              {uploading ? "Uploading…" : "Click to upload or drag and drop"}
-            </div>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/*"
-              multiple
-              className="upload-input"
-            />
-          </div>
-        </form>
-      </section>
 
-      {/* Expense Summary */}
-      <section className="card summary-card">
-        <div className="summary-header">
-          <h2 className="summary-title">Expense Summary</h2>
-
-          <div className="summary-toggle">
-            <button
-              type="button"
-              className={summaryMode === "total" ? "active" : ""}
-              onClick={() => setSummaryMode("total")}
-            >
-              $ Total
-            </button>
-            <button
-              type="button"
-              className={summaryMode === "percentage" ? "active" : ""}
-              onClick={() => setSummaryMode("percentage")}
-            >
-              % Percentage
-            </button>
-          </div>
-        </div>
-
-        {hasReceipts ? (
-          <div className="summary-grid">
-            {/* Left: pie chart */}
-            <div className="summary-chart">
-              <ResponsiveContainer width="100%" height={220}>
-                <PieChart>
-                  <Pie
-                    data={summaryData}
-                    dataKey={
-                      summaryMode === "total" ? "amount" : "percentage"
-                    }
-                    nameKey="category"
-                    innerRadius={60}
-                    outerRadius={90}
-                    paddingAngle={2}
-                    label={({ category, percentage }: any) =>
-                      `${category} ${percentage.toFixed(1)}%`
-                    }
-                  >
-                    {summaryData.map((entry, index) => (
-                      <Cell
-                        key={entry.category}
-                        fill={
-                          SUMMARY_COLORS[index % SUMMARY_COLORS.length]
-                        }
-                      />
-                    ))}
-                  </Pie>
-                </PieChart>
-              </ResponsiveContainer>
-            </div>
-
-            {/* Right: total + legend */}
-            <div className="summary-details">
-              <div className="summary-amount-block">
-                <div className="summary-amount-label">
-                  Total Expenses
-                </div>
-                <div className="summary-amount">
-                  {formatAmount(totalExpenses, "PHP")}
-                </div>
+        {/* Upload card */}
+        <section className="card upload-card">
+          <form onSubmit={handleUpload} className="upload-dropzone">
+            <div className="upload-inner">
+              <div className="upload-icon">⬆️</div>
+              <div className="upload-title">Upload Receipt</div>
+              <div className="upload-subtitle">
+                {uploading ? "Uploading…" : "Click to upload or drag and drop"}
               </div>
-
-              <div className="summary-divider" />
-
-              <div className="summary-list">
-                {summaryData.map((entry, index) => (
-                  <div className="summary-row" key={entry.category}>
-                    <div className="summary-left">
-                      <span
-                        className="summary-dot"
-                        style={{
-                          backgroundColor:
-                            SUMMARY_COLORS[index % SUMMARY_COLORS.length],
-                        }}
-                      />
-                      <span>{entry.category}</span>
-                    </div>
-                    <div className="summary-right">
-                      {entry.percentage.toFixed(1)}% (
-                      {formatAmount(entry.amount, "PHP")})
-                    </div>
-                  </div>
-                ))}
-              </div>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                multiple
+                className="upload-input"
+              />
             </div>
-          </div>
-        ) : (
-          <p className="muted-text">
-            No receipts yet. Upload a receipt to see your spending
-            summary.
-          </p>
-        )}
-      </section>
+          </form>
+        </section>
 
-      {/* Receipt history */}
-      <section className="card history-card">
-        <div className="history-header">
-          <div>
-            <h2 className="history-title">Receipt History</h2>
-            <p className="history-subtitle">
-              Review and edit your receipts. Click a row to view items and
-              the original image.
-            </p>
-          </div>
+        {/* Expense Summary */}
+        <section className="card summary-card">
+          <div className="summary-header">
+            <h2 className="summary-title">Expense Summary</h2>
 
-          <div className="history-filters">
-            <label className="filter-label">
-              Filter:
-              <select
-                value={filterCategory}
-                onChange={(e) => setFilterCategory(e.target.value)}
+            <div className="summary-toggle">
+              <button
+                type="button"
+                className={summaryMode === "total" ? "active" : ""}
+                onClick={() => setSummaryMode("total")}
               >
-                <option value="All Categories">All Categories</option>
-                {categories.map((cat) => (
-                  <option key={cat} value={cat}>
-                    {cat}
-                  </option>
-                ))}
-              </select>
-            </label>
+                $ Total
+              </button>
+              <button
+                type="button"
+                className={summaryMode === "percentage" ? "active" : ""}
+                onClick={() => setSummaryMode("percentage")}
+              >
+                % Percentage
+              </button>
+            </div>
           </div>
-        </div>
 
-        {error && (
-          <p style={{ color: "#b91c1c", fontSize: 13, marginBottom: 8 }}>
-            {error}
-          </p>
-        )}
-
-        {hasReceipts ? (
-          <table className="receipts-table">
-            <thead>
-              <tr>
-                <th>Store Name</th>
-                <th onClick={() => toggleSort("date")} className="sortable">
-                  Date{" "}
-                  <span className="sort-indicator">
-                    {sortField === "date"
-                      ? sortDir === "asc"
-                        ? "↑"
-                        : "↓"
-                      : "↕"}
-                  </span>
-                </th>
-                <th
-                  onClick={() => toggleSort("category")}
-                  className="sortable"
-                >
-                  Category{" "}
-                  <span className="sort-indicator">
-                    {sortField === "category"
-                      ? sortDir === "asc"
-                        ? "↑"
-                        : "↓"
-                      : "↕"}
-                  </span>
-                </th>
-                <th
-                  onClick={() => toggleSort("total")}
-                  className="sortable"
-                >
-                  Total Amount{" "}
-                  <span className="sort-indicator">
-                    {sortField === "total"
-                      ? sortDir === "asc"
-                        ? "↑"
-                        : "↓"
-                      : "↕"}
-                  </span>
-                </th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-
-            <tbody>
-              {sorted.map((r) => {
-                const isExpanded = expandedId === r.id;
-                const isEditing = editingReceiptId === r.id;
-                const imageUrl = r.file_url || r.file || "";
-
-                const subtotal = r.items.reduce((sum, it) => {
-                  const v = parseFloat(it.line_total || "0") || 0;
-                  return sum + v;
-                }, 0);
-
-                return (
-                  <>
-                    <tr
-                      key={r.id}
-                      className={
-                        "receipt-row" + (isExpanded ? " expanded" : "")
+          {hasReceipts ? (
+            <div className="summary-grid">
+              {/* Left: pie chart */}
+              <div className="summary-chart">
+                <ResponsiveContainer width="100%" height={220}>
+                  <PieChart>
+                    <Pie
+                      data={summaryData}
+                      dataKey={
+                        summaryMode === "total" ? "amount" : "percentage"
                       }
-                      onClick={() =>
-                        setExpandedId((prev) =>
-                          prev === r.id ? null : r.id
-                        )
+                      nameKey="category"
+                      innerRadius={60}
+                      outerRadius={90}
+                      paddingAngle={2}
+                      label={({ category, percentage }: any) =>
+                        `${category} ${percentage.toFixed(1)}%`
                       }
                     >
-                      <td>
-                        <span className="chevron">
-                          {isExpanded ? (
-                            <ChevronDown size={12} />
-                          ) : (
-                            <ChevronRight size={12} />
-                          )}
-                        </span>
-                        {isEditing ? (
-                          <input
-                            className="inline-input"
-                            value={
-                              (receiptDraft.store_name as string) ??
-                              r.store_name ??
-                              ""
-                            }
-                            onChange={(e) =>
-                              setReceiptDraft((prev) => ({
-                                ...prev,
-                                store_name: e.target.value,
-                              }))
-                            }
-                          />
-                        ) : (
-                          r.store_name || "—"
-                        )}
-                      </td>
+                      {summaryData.map((entry, index) => (
+                        <Cell
+                          key={entry.category}
+                          fill={
+                            SUMMARY_COLORS[index % SUMMARY_COLORS.length]
+                          }
+                        />
+                      ))}
+                    </Pie>
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
 
-                      <td>
-                        {isEditing ? (
-                          <input
-                            type="date"
-                            className="inline-input"
-                            value={
-                              (receiptDraft.date as string) ?? r.date ?? ""
-                            }
-                            onChange={(e) =>
-                              setReceiptDraft((prev) => ({
-                                ...prev,
-                                date: e.target.value,
-                              }))
-                            }
-                          />
-                        ) : (
-                          r.date || "—"
-                        )}
-                      </td>
+              {/* Right: total + legend */}
+              <div className="summary-details">
+                <div className="summary-amount-block">
+                  <div className="summary-amount-label">
+                    Total Expenses
+                  </div>
+                  <div className="summary-amount">
+                    {formatAmount(totalExpenses, "PHP")}
+                  </div>
+                </div>
 
-                      <td>
-                        {isEditing ? (
-                          <input
-                            className="inline-input"
-                            value={
-                              (receiptDraft.category as string) ??
-                              r.category ??
-                              ""
-                            }
-                            onChange={(e) =>
-                              setReceiptDraft((prev) => ({
-                                ...prev,
-                                category: e.target.value,
-                              }))
-                            }
-                          />
-                        ) : (
-                          <span className="category-pill">
-                            {r.category || "Other"}
-                          </span>
-                        )}
-                      </td>
+                <div className="summary-divider" />
 
-                      <td>
-                        {isEditing ? (
-                          <input
-                            className="inline-input"
-                            type="number"
-                            step="0.01"
-                            value={
-                              (receiptDraft.total_amount as string) ??
-                              r.total_amount ??
-                              ""
-                            }
-                            onChange={(e) =>
-                              setReceiptDraft((prev) => ({
-                                ...prev,
-                                total_amount: e.target.value,
-                              }))
-                            }
-                          />
-                        ) : (
-                          formatAmount(r.total_amount, r.currency)
-                        )}
-                      </td>
+                <div className="summary-list">
+                  {summaryData.map((entry, index) => (
+                    <div className="summary-row" key={entry.category}>
+                      <div className="summary-left">
+                        <span
+                          className="summary-dot"
+                          style={{
+                            backgroundColor:
+                              SUMMARY_COLORS[index % SUMMARY_COLORS.length],
+                          }}
+                        />
+                        <span>{entry.category}</span>
+                      </div>
+                      <div className="summary-right">
+                        {entry.percentage.toFixed(1)}% (
+                        {formatAmount(entry.amount, "PHP")})
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          ) : (
+            <p className="muted-text">
+              No receipts yet. Upload a receipt to see your spending
+              summary.
+            </p>
+          )}
+        </section>
 
-                      <td
-                        onClick={(e) => {
-                          e.stopPropagation();
-                        }}
+        {/* Receipt history */}
+        <section className="card history-card">
+          <section className="panel">
+            <div className="receipt-header-row">
+              <div>
+                <div className="panel-title">Receipt History</div>
+                <div className="panel-subtitle">
+                  Review and edit your receipts. Click a row to view items and the original image.
+                </div>
+              </div>
+
+              <div className="export-wrapper">
+                <button
+                  type="button"
+                  className="secondary-btn"
+                  onClick={() => setExportOpen((open) => !open)}
+                >
+                  Export ▾
+                </button>
+
+                {exportOpen && (
+                  <div className="export-menu">
+                    <button type="button" onClick={exportAsCsv}>
+                      Export as .csv
+                    </button>
+                    <button type="button" onClick={exportAsXlsx}>
+                      Export as .xlsx
+                    </button>
+                    <button type="button" onClick={exportForGoogleSheets}>
+                      Export for Google Sheets
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* keep your existing Filter + table / accordion UI here */}
+
+
+            <div className="history-filters">
+              <label className="filter-label">
+                Filter:
+                <select
+                  value={filterCategory}
+                  onChange={(e) => setFilterCategory(e.target.value)}
+                >
+                  <option value="All Categories">All Categories</option>
+                  {categories.map((cat) => (
+                    <option key={cat} value={cat}>
+                      {cat}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          </section>
+
+          {error && (
+            <p style={{ color: "#b91c1c", fontSize: 13, marginBottom: 8 }}>
+              {error}
+            </p>
+          )}
+
+          {hasReceipts ? (
+            <table className="receipts-table">
+              <thead>
+                <tr>
+                  <th>Store Name</th>
+                  <th onClick={() => toggleSort("date")} className="sortable">
+                    Date{" "}
+                    <span className="sort-indicator">
+                      {sortField === "date"
+                        ? sortDir === "asc"
+                          ? "↑"
+                          : "↓"
+                        : "↕"}
+                    </span>
+                  </th>
+                  <th
+                    onClick={() => toggleSort("category")}
+                    className="sortable"
+                  >
+                    Category{" "}
+                    <span className="sort-indicator">
+                      {sortField === "category"
+                        ? sortDir === "asc"
+                          ? "↑"
+                          : "↓"
+                        : "↕"}
+                    </span>
+                  </th>
+                  <th
+                    onClick={() => toggleSort("total")}
+                    className="sortable"
+                  >
+                    Total Amount{" "}
+                    <span className="sort-indicator">
+                      {sortField === "total"
+                        ? sortDir === "asc"
+                          ? "↑"
+                          : "↓"
+                        : "↕"}
+                    </span>
+                  </th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+
+              <tbody>
+                {sorted.map((r) => {
+                  const isExpanded = expandedId === r.id;
+                  const isEditing = editingReceiptId === r.id;
+                  const imageUrl = r.file_url || r.file || "";
+
+                  const subtotal = r.items.reduce((sum, it) => {
+                    const v = parseFloat(it.line_total || "0") || 0;
+                    return sum + v;
+                  }, 0);
+
+                  return (
+                    <>
+                      <tr
+                        key={r.id}
+                        className={
+                          "receipt-row" + (isExpanded ? " expanded" : "")
+                        }
+                        onClick={() =>
+                          setExpandedId((prev) =>
+                            prev === r.id ? null : r.id
+                          )
+                        }
                       >
-                        {isEditing ? (
-                          <>
-                            <button
-                              className="icon-btn success"
-                              type="button"
-                              onClick={() => saveReceipt(r)}
-                            >
-                              <Check size={14} />
-                            </button>
-                            <button
-                              className="icon-btn"
-                              type="button"
-                              onClick={cancelEditReceipt}
-                            >
-                              <X size={14} />
-                            </button>
-                          </>
-                        ) : (
-                          <>
-                            <button
-                              className="icon-btn"
-                              type="button"
-                              onClick={() => startEditReceipt(r)}
-                            >
-                              <Pencil size={14} />
-                            </button>
-                            <button
-                              className="icon-btn danger"
-                              type="button"
-                              onClick={() => deleteReceipt(r)}
-                            >
-                              <Trash2 size={14} />
-                            </button>
-                          </>
-                        )}
-                      </td>
-                    </tr>
+                        <td>
+                          <span className="chevron">
+                            {isExpanded ? (
+                              <ChevronDown size={12} />
+                            ) : (
+                              <ChevronRight size={12} />
+                            )}
+                          </span>
+                          {isEditing ? (
+                            <input
+                              className="inline-input"
+                              value={
+                                (receiptDraft.store_name as string) ??
+                                r.store_name ??
+                                ""
+                              }
+                              onChange={(e) =>
+                                setReceiptDraft((prev) => ({
+                                  ...prev,
+                                  store_name: e.target.value,
+                                }))
+                              }
+                            />
+                          ) : (
+                            r.store_name || "—"
+                          )}
+                        </td>
 
-                    {isExpanded && (
-                      <tr className="accordion-row">
-                        <td colSpan={5} className="accordion-cell">
-                          <div className="accordion-content open">
-                            <div
-                              className="accordion-inner"
-                              onClick={(e) => e.stopPropagation()}
-                            >
-                              {/* Left: items */}
-                              <div className="accordion-left">
-                                <h4>Receipt Items</h4>
-                                {r.items && r.items.length > 0 ? (
-                                  <table className="items-table">
-                                    <thead>
-                                      <tr>
-                                        <th>Item Name</th>
-                                        <th>Quantity</th>
-                                        <th>Price</th>
-                                        <th>Total</th>
-                                        <th>Actions</th>
-                                      </tr>
-                                    </thead>
-                                    <tbody>
-                                      {r.items.map((item) => {
-                                        const editingThis =
-                                          editingItemId === item.id;
-                                        return (
-                                          <tr key={item.id}>
-                                            <td>
-                                              {editingThis ? (
-                                                <input
-                                                  className="inline-input"
-                                                  value={
-                                                    (itemDraft.description as string) ??
-                                                    item.description
-                                                  }
-                                                  onChange={(e) =>
-                                                    setItemDraft((prev) => ({
-                                                      ...prev,
-                                                      description:
-                                                        e.target.value,
-                                                    }))
-                                                  }
-                                                />
-                                              ) : (
-                                                item.description
-                                              )}
-                                            </td>
-                                            <td>
-                                              {editingThis ? (
-                                                <input
-                                                  className="inline-input"
-                                                  type="number"
-                                                  step="0.01"
-                                                  value={
-                                                    (itemDraft.quantity as string) ??
-                                                    item.quantity
-                                                  }
-                                                  onChange={(e) =>
-                                                    setItemDraft((prev) => ({
-                                                      ...prev,
-                                                      quantity:
-                                                        e.target.value,
-                                                    }))
-                                                  }
-                                                />
-                                              ) : (
-                                                item.quantity
-                                              )}
-                                            </td>
-                                            <td>
-                                              {editingThis ? (
-                                                <input
-                                                  className="inline-input"
-                                                  type="number"
-                                                  step="0.01"
-                                                  value={
-                                                    (itemDraft.unit_price as string) ??
-                                                    item.unit_price
-                                                  }
-                                                  onChange={(e) =>
-                                                    setItemDraft((prev) => ({
-                                                      ...prev,
-                                                      unit_price:
-                                                        e.target.value,
-                                                    }))
-                                                  }
-                                                />
-                                              ) : (
-                                                item.unit_price
-                                              )}
-                                            </td>
-                                            <td>{item.line_total}</td>
-                                            <td>
-                                              {editingThis ? (
-                                                <>
-                                                  <button
-                                                    className="icon-btn success"
-                                                    type="button"
-                                                    onClick={() =>
-                                                      saveItem(r.id, item)
+                        <td>
+                          {isEditing ? (
+                            <input
+                              type="date"
+                              className="inline-input"
+                              value={
+                                (receiptDraft.date as string) ?? r.date ?? ""
+                              }
+                              onChange={(e) =>
+                                setReceiptDraft((prev) => ({
+                                  ...prev,
+                                  date: e.target.value,
+                                }))
+                              }
+                            />
+                          ) : (
+                            r.date || "—"
+                          )}
+                        </td>
+
+                        <td>
+                          {isEditing ? (
+                            <input
+                              className="inline-input"
+                              value={
+                                (receiptDraft.category as string) ??
+                                r.category ??
+                                ""
+                              }
+                              onChange={(e) =>
+                                setReceiptDraft((prev) => ({
+                                  ...prev,
+                                  category: e.target.value,
+                                }))
+                              }
+                            />
+                          ) : (
+                            <span className="category-pill">
+                              {r.category || "Other"}
+                            </span>
+                          )}
+                        </td>
+
+                        <td>
+                          {isEditing ? (
+                            <input
+                              className="inline-input"
+                              type="number"
+                              step="0.01"
+                              value={
+                                (receiptDraft.total_amount as string) ??
+                                r.total_amount ??
+                                ""
+                              }
+                              onChange={(e) =>
+                                setReceiptDraft((prev) => ({
+                                  ...prev,
+                                  total_amount: e.target.value,
+                                }))
+                              }
+                            />
+                          ) : (
+                            formatAmount(r.total_amount, r.currency)
+                          )}
+                        </td>
+
+                        <td
+                          onClick={(e) => {
+                            e.stopPropagation();
+                          }}
+                        >
+                          {isEditing ? (
+                            <>
+                              <button
+                                className="icon-btn success"
+                                type="button"
+                                onClick={() => saveReceipt(r)}
+                              >
+                                <Check size={14} />
+                              </button>
+                              <button
+                                className="icon-btn"
+                                type="button"
+                                onClick={cancelEditReceipt}
+                              >
+                                <X size={14} />
+                              </button>
+                            </>
+                          ) : (
+                            <>
+                              <button
+                                className="icon-btn"
+                                type="button"
+                                onClick={() => startEditReceipt(r)}
+                              >
+                                <Pencil size={14} />
+                              </button>
+                              <button
+                                className="icon-btn danger"
+                                type="button"
+                                onClick={() => deleteReceipt(r)}
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            </>
+                          )}
+                        </td>
+                      </tr>
+
+                      {isExpanded && (
+                        <tr className="accordion-row">
+                          <td colSpan={5} className="accordion-cell">
+                            <div className="accordion-content open">
+                              <div
+                                className="accordion-inner"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                {/* Left: items */}
+                                <div className="accordion-left">
+                                  <h4>Receipt Items</h4>
+                                  {r.items && r.items.length > 0 ? (
+                                    <table className="items-table">
+                                      <thead>
+                                        <tr>
+                                          <th>Item Name</th>
+                                          <th>Quantity</th>
+                                          <th>Price</th>
+                                          <th>Total</th>
+                                          <th>Actions</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody>
+                                        {r.items.map((item) => {
+                                          const editingThis =
+                                            editingItemId === item.id;
+                                          return (
+                                            <tr key={item.id}>
+                                              <td>
+                                                {editingThis ? (
+                                                  <input
+                                                    className="inline-input"
+                                                    value={
+                                                      (itemDraft.description as string) ??
+                                                      item.description
                                                     }
-                                                  >
-                                                    <Check size={14} />
-                                                  </button>
+                                                    onChange={(e) =>
+                                                      setItemDraft((prev) => ({
+                                                        ...prev,
+                                                        description:
+                                                          e.target.value,
+                                                      }))
+                                                    }
+                                                  />
+                                                ) : (
+                                                  item.description
+                                                )}
+                                              </td>
+                                              <td>
+                                                {editingThis ? (
+                                                  <input
+                                                    className="inline-input"
+                                                    type="number"
+                                                    step="0.01"
+                                                    value={
+                                                      (itemDraft.quantity as string) ??
+                                                      item.quantity
+                                                    }
+                                                    onChange={(e) =>
+                                                      setItemDraft((prev) => ({
+                                                        ...prev,
+                                                        quantity:
+                                                          e.target.value,
+                                                      }))
+                                                    }
+                                                  />
+                                                ) : (
+                                                  item.quantity
+                                                )}
+                                              </td>
+                                              <td>
+                                                {editingThis ? (
+                                                  <input
+                                                    className="inline-input"
+                                                    type="number"
+                                                    step="0.01"
+                                                    value={
+                                                      (itemDraft.unit_price as string) ??
+                                                      item.unit_price
+                                                    }
+                                                    onChange={(e) =>
+                                                      setItemDraft((prev) => ({
+                                                        ...prev,
+                                                        unit_price:
+                                                          e.target.value,
+                                                      }))
+                                                    }
+                                                  />
+                                                ) : (
+                                                  item.unit_price
+                                                )}
+                                              </td>
+                                              <td>{item.line_total}</td>
+                                              <td>
+                                                {editingThis ? (
+                                                  <>
+                                                    <button
+                                                      className="icon-btn success"
+                                                      type="button"
+                                                      onClick={() =>
+                                                        saveItem(r.id, item)
+                                                      }
+                                                    >
+                                                      <Check size={14} />
+                                                    </button>
+                                                    <button
+                                                      className="icon-btn"
+                                                      type="button"
+                                                      onClick={
+                                                        cancelEditItem
+                                                      }
+                                                    >
+                                                      <X size={14} />
+                                                    </button>
+                                                  </>
+                                                ) : (
                                                   <button
                                                     className="icon-btn"
                                                     type="button"
-                                                    onClick={
-                                                      cancelEditItem
+                                                    onClick={() =>
+                                                      startEditItem(item)
                                                     }
                                                   >
-                                                    <X size={14} />
+                                                    <Pencil size={14} />
                                                   </button>
-                                                </>
-                                              ) : (
-                                                <button
-                                                  className="icon-btn"
-                                                  type="button"
-                                                  onClick={() =>
-                                                    startEditItem(item)
-                                                  }
-                                                >
-                                                  <Pencil size={14} />
-                                                </button>
-                                              )}
-                                            </td>
-                                          </tr>
-                                        );
-                                      })}
-                                      <tr className="subtotal-row">
-                                        <td
-                                          colSpan={3}
-                                          style={{ textAlign: "right" }}
-                                        >
-                                          Subtotal:
-                                        </td>
-                                        <td>
-                                          {formatAmount(
-                                            subtotal,
-                                            r.currency
-                                          )}
-                                        </td>
-                                        <td />
-                                      </tr>
-                                    </tbody>
-                                  </table>
-                                ) : (
-                                  <p className="muted-text">
-                                    No items extracted.
-                                  </p>
-                                )}
-                              </div>
+                                                )}
+                                              </td>
+                                            </tr>
+                                          );
+                                        })}
+                                        <tr className="subtotal-row">
+                                          <td
+                                            colSpan={3}
+                                            style={{ textAlign: "right" }}
+                                          >
+                                            Subtotal:
+                                          </td>
+                                          <td>
+                                            {formatAmount(
+                                              subtotal,
+                                              r.currency
+                                            )}
+                                          </td>
+                                          <td />
+                                        </tr>
+                                      </tbody>
+                                    </table>
+                                  ) : (
+                                    <p className="muted-text">
+                                      No items extracted.
+                                    </p>
+                                  )}
+                                </div>
 
-                              {/* Right: image */}
-                              <div className="accordion-right">
-                                <h4>Receipt Image</h4>
-                                {imageUrl ? (
-                                  <div
-                                    className="receipt-image-clickable tall"
-                                    onClick={() =>
-                                      openImageModal(imageUrl)
-                                    }
-                                  >
-                                    <img src={imageUrl} alt="Receipt" />
-                                    <div className="receipt-image-overlay">
-                                      <span>Click to enlarge</span>
+                                {/* Right: image */}
+                                <div className="accordion-right">
+                                  <h4>Receipt Image</h4>
+                                  {imageUrl ? (
+                                    <div
+                                      className="receipt-image-clickable tall"
+                                      onClick={() =>
+                                        openImageModal(imageUrl)
+                                      }
+                                    >
+                                      <img src={imageUrl} alt="Receipt" />
+                                      <div className="receipt-image-overlay">
+                                        <span>Click to enlarge</span>
+                                      </div>
                                     </div>
-                                  </div>
-                                ) : (
-                                  <p className="muted-text">
-                                    No image available.
-                                  </p>
-                                )}
+                                  ) : (
+                                    <p className="muted-text">
+                                      No image available.
+                                    </p>
+                                  )}
+                                </div>
                               </div>
                             </div>
-                          </div>
-                        </td>
-                      </tr>
-                    )}
-                  </>
-                );
-              })}
-            </tbody>
-          </table>
-        ) : (
-          <p className="muted-text">
-            No receipts uploaded yet. Upload your first receipt to get
-            started.
-          </p>
-        )}
-      </section>
+                          </td>
+                        </tr>
+                      )}
+                    </>
+                  );
+                })}
+              </tbody>
+            </table>
+          ) : (
+            <p className="muted-text">
+              No receipts uploaded yet. Upload your first receipt to get
+              started.
+            </p>
+          )}
+        </section>
 
-      {/* Image modal */}
-      {modalImageUrl && (
-        <div className="modal-backdrop" onClick={closeImageModal}>
-          <div
-            className="modal-content"
-            onClick={(e) => e.stopPropagation()} // prevent backdrop click
-          >
-            <div className="modal-header">
-              <div className="zoom-controls">
+        {/* Image modal */}
+        {modalImageUrl && (
+          <div className="modal-backdrop" onClick={closeImageModal}>
+            <div
+              className="modal-content"
+              onClick={(e) => e.stopPropagation()} // prevent backdrop click
+            >
+              <div className="modal-header">
+                <div className="zoom-controls">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setModalZoom((z) => Math.max(0.5, z - 0.25))
+                    }
+                  >
+                    -
+                  </button>
+                  <span>{Math.round(modalZoom * 100)}%</span>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setModalZoom((z) => Math.min(3, z + 0.25))
+                    }
+                  >
+                    +
+                  </button>
+                </div>
+
                 <button
                   type="button"
-                  onClick={() =>
-                    setModalZoom((z) => Math.max(0.5, z - 0.25))
-                  }
+                  className="modal-close-btn"
+                  onClick={closeImageModal}
                 >
-                  -
-                </button>
-                <span>{Math.round(modalZoom * 100)}%</span>
-                <button
-                  type="button"
-                  onClick={() =>
-                    setModalZoom((z) => Math.min(3, z + 0.25))
-                  }
-                >
-                  +
+                  <X size={16} />
                 </button>
               </div>
 
-              <button
-                type="button"
-                className="modal-close-btn"
-                onClick={closeImageModal}
-              >
-                <X size={16} />
-              </button>
-            </div>
-
-            <div className="modal-image-wrapper">
-              <img
-                src={modalImageUrl}
-                alt="Receipt full"
-                style={{ transform: `scale(${modalZoom})` }}
-              />
+              <div className="modal-image-wrapper">
+                <img
+                  src={modalImageUrl}
+                  alt="Receipt full"
+                  style={{ transform: `scale(${modalZoom})` }}
+                />
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        )}
 
       </div>
     </>

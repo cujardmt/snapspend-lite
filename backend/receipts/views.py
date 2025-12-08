@@ -39,7 +39,8 @@ class ReceiptUploadView(APIView):
 
     # IMPORTANT: disable DRF auth here (so no CSRF)
     authentication_classes: list = []  # dev-only; later you can use token/JWT
-    permission_classes = [permissions.AllowAny]
+    # permission_classes = [permissions.AllowAny]
+    permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request, *args, **kwargs):
         # Try to get multiple files first
@@ -138,7 +139,8 @@ class ReceiptViewSet(viewsets.ModelViewSet):
 
     # Use CSRF-exempt auth to avoid 403s from DRF
     authentication_classes = (CsrfExemptSessionAuthentication,)
-    permission_classes = [permissions.AllowAny]
+    # permission_classes = [permissions.AllowAny]
+    permission_classes = [permissions.IsAuthenticated]
 
     def list(self, request, *args, **kwargs):
         receipts = Receipt.objects.all().order_by("-id")
@@ -188,4 +190,4 @@ class ReceiptItemViewSet(viewsets.ModelViewSet):
 
     # Disable CSRF for DRF (same pattern as ReceiptViewSet)
     authentication_classes = (CsrfExemptSessionAuthentication,)
-    permission_classes = [permissions.AllowAny]
+    permission_classes = [permissions.IsAuthenticated]
